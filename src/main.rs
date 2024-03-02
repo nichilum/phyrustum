@@ -1,8 +1,10 @@
-use minifb::{Key, ScaleMode, Window, WindowOptions};
+use fast_poisson::Poisson2D;
+use image::{open, GenericImage, GenericImageView, ImageBuffer};
+use minifb::{Key, KeyRepeat, ScaleMode, Window, WindowOptions};
 use rand::Rng;
 
-const WIDTH: usize = 1280;
-const HEIGHT: usize = 720;
+const WIDTH: usize = 1024;
+const HEIGHT: usize = 1024;
 
 fn main() {
     let mut rng = rand::thread_rng();
@@ -11,30 +13,18 @@ fn main() {
 
     // init environment
     let mut env = vec![0f32; WIDTH * HEIGHT];
-    let mut agents: Vec<Agent> = Vec::new();
-    for x in 0..WIDTH {
-        for y in 0..HEIGHT {
-            if x % 15 == 0 && y % 15 == 0 {
-                agents.push(Agent {
-                    x: x as f32,
-                    y: y as f32,
-                    rotation: ((x % 360) as f32).to_radians(),
-                    sensor_angle: 45f32.to_radians(),
-                    rotation_angle: 45f32.to_radians(),
-                    sensor_offset_distance: 9.,
-                    sensor_width: 1.,
-                    step_size: 1.,
-                    deposition_size: 5.,
-                    random_dir_change_prob: 0.,
-                    sensitivity_thresh: 0.,
-                });
-            }
-        }
-    }
+    // for (x, y, pixel) in open("assets/env_map.png")
+    //     .unwrap()
+    //     .into_luma8()
+    //     .enumerate_pixels()
+    // {
+    //     env[two_d_one_d(x as usize, y as usize)] = *pixel.0.get(0).unwrap() as f32 / 50.;
+    // }
+    let (mut agents, mut collision_map) = setup_agents();
 
     // init window
     let mut window = Window::new(
-        "Noise Test - Press ESC to exit",
+        "Phyrustum",
         WIDTH,
         HEIGHT,
         WindowOptions {
@@ -46,13 +36,20 @@ fn main() {
     .expect("Unable to create the window");
 
     while window.is_open() && !window.is_key_down(Key::Escape) {
+        // Reset env
+        if window.is_key_pressed(Key::R, KeyRepeat::No) {
+            for value in env.iter_mut() {
+                *value = 0.;
+            }
+        }
+        // Draw
         if let Some((x, y)) = window.get_mouse_pos(minifb::MouseMode::Clamp) {
             if window.get_mouse_down(minifb::MouseButton::Left) {
-                env[two_d_one_d(x as usize, y as usize)] = 4.;
+                env[two_d_one_d(x as usize, y as usize)] = 100.;
             }
         }
 
-        // agent move
+        // agent motor stage
         for agent in agents.iter_mut() {
             let (n_x, n_y) = (
                 agent.x + agent.rotation.sin() * agent.step_size,
@@ -60,17 +57,59 @@ fn main() {
             );
 
             if n_x > 0. && n_y > 0. && (n_x as usize) < WIDTH && (n_y as usize) < HEIGHT {
-                agent.x = n_x;
-                agent.y = n_y;
-            } else {
-                // should be random, later
-                agent.rotation = (rng.gen_range(0..360) as f32).to_radians();
+                if collision_map[n_x as usize][n_y as usize] == 0 {
+                    // doesn't work correctly -> random agent movements
+                    collision_map[n_x as usize][n_y as usize] = 1;
+                    collision_map[agent.x as usize][agent.y as usize] = 0;
+
+                    agent.x = n_x;
+                    agent.y = n_y;
+                    // agent deposit
+                    env[two_d_one_d(agent.x as usize, agent.y as usize)] = agent.deposition_size;
+                } else {
+                    agent.rotation = (rng.gen_range(0..360) as f32).to_radians();
+                }
             }
         }
 
-        // agent deposit
-        for agent in agents.iter() {
-            env[two_d_one_d(agent.x as usize, agent.y as usize)] = agent.deposition_size;
+        // agent sensory stage
+        for agent in agents.iter_mut() {
+            let (front_x, front_y) = (
+                (agent.x + agent.rotation.sin() * agent.sensor_offset_distance)
+                    .clamp(0., (WIDTH - 1) as f32),
+                (agent.y + agent.rotation.cos() * agent.sensor_offset_distance)
+                    .clamp(0., (HEIGHT - 1) as f32),
+            );
+            let (left_x, left_y) = (
+                (agent.x
+                    + (agent.rotation - agent.sensor_angle).sin() * agent.sensor_offset_distance)
+                    .clamp(0., (WIDTH - 1) as f32),
+                (agent.y
+                    + (agent.rotation - agent.sensor_angle).cos() * agent.sensor_offset_distance)
+                    .clamp(0., (HEIGHT - 1) as f32),
+            );
+            let (right_x, right_y) = (
+                (agent.x
+                    + (agent.rotation + agent.sensor_angle).sin() * agent.sensor_offset_distance)
+                    .clamp(0., (WIDTH - 1) as f32),
+                (agent.y
+                    + (agent.rotation + agent.sensor_angle).cos() * agent.sensor_offset_distance)
+                    .clamp(0., (HEIGHT - 1) as f32),
+            );
+
+            let trail_value_front: f32 = env[two_d_one_d(front_x as usize, front_y as usize)];
+            let trail_value_left: f32 = env[two_d_one_d(left_x as usize, left_y as usize)];
+            let trail_value_right: f32 = env[two_d_one_d(right_x as usize, right_y as usize)];
+
+            if trail_value_front > trail_value_left && trail_value_front > trail_value_right {
+            } else if trail_value_front < trail_value_left && trail_value_front < trail_value_right
+            {
+                agent.rotation += (rng.gen_range(0..=1) * 2 - 1) as f32 * agent.rotation_angle;
+            } else if trail_value_left < trail_value_right {
+                agent.rotation += agent.rotation_angle;
+            } else if trail_value_right < trail_value_left {
+                agent.rotation -= agent.rotation_angle;
+            }
         }
 
         // Diffuse
@@ -89,18 +128,90 @@ fn main() {
             );
         }
 
-        // agent pos to buffer
-        for agent in agents.iter() {
-            buffer[two_d_one_d(agent.x as usize, agent.y as usize)] = rgb_to_color(
-                (agent.rotation * 50.) as u32,
-                (agent.rotation * 50.) as u32,
-                255,
-            );
+        if window.is_key_down(Key::Space) {
+            // agent pos to buffer
+            for agent in agents.iter() {
+                buffer[two_d_one_d(agent.x as usize, agent.y as usize)] = rgb_to_color(0, 0, 255);
+            }
+
+            // collision to buffer
+            for x in 0..WIDTH {
+                for y in 0..HEIGHT {
+                    if collision_map[x][y] != 0 {
+                        buffer[two_d_one_d(x, y)] = rgb_to_color(0, 255, 0);
+                    }
+                }
+            }
         }
 
         // update window
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
+}
+
+/// (agents, collision_map)
+fn setup_agents() -> (Vec<Agent>, Vec<Vec<u8>>) {
+    let mut rng = rand::thread_rng();
+    let mut agents: Vec<Agent> = Vec::new();
+    let mut collision_map: Vec<Vec<u8>> = vec![vec![0; HEIGHT]; WIDTH];
+    // let points = Poisson2D::new().with_dimensions([WIDTH as f64, HEIGHT as f64], 10.0);
+
+    // for point in points.iter() {
+    //     if point[0] > 15.
+    //         && point[1] > 15.
+    //         && point[0] < (WIDTH - 15) as f64
+    //         && point[1] < (HEIGHT - 15) as f64
+    //     {
+    //         agents.push(Agent {
+    //             x: point[0] as f32,
+    //             y: point[1] as f32,
+    //             rotation: (rng.gen_range(0..360) as f32).to_radians(),
+    //             sensor_angle: (rng.gen_range(20..45) as f32).to_radians(),
+    //             rotation_angle: (rng.gen_range(20..45) as f32).to_radians(),
+    //             sensor_offset_distance: 9.,
+    //             sensor_width: 1.,
+    //             step_size: 1.,
+    //             deposition_size: 1.,
+    //             random_dir_change_prob: 0.,
+    //             sensitivity_thresh: 0.,
+    //         });
+    //         collision_map[point[0] as usize][point[1] as usize] = 1;
+    //     }
+    // }
+
+    for (x, y, pixel) in open("assets/Nichilum.png")
+        .unwrap()
+        .into_luma8()
+        .enumerate_pixels()
+    {
+        if *pixel.0.get(0).unwrap() != 0 && x % 10 == 0 && y % 10 == 0 {
+            println!("{:?}", *pixel.0.get(0).unwrap());
+            agents.push(Agent {
+                x: x as f32,
+                y: y as f32,
+                rotation: (rng.gen_range(0..360) as f32).to_radians(),
+                sensor_angle: (rng.gen_range(20..45) as f32).to_radians(),
+                rotation_angle: (rng.gen_range(20..45) as f32).to_radians(),
+                sensor_offset_distance: 19., // 9
+                sensor_width: 1.,
+                step_size: 1.5,      // 1
+                deposition_size: 1., // 5
+                random_dir_change_prob: 0.,
+                sensitivity_thresh: 0.,
+            });
+            collision_map[x as usize][y as usize] = 1;
+        }
+    }
+
+    for x in 0..WIDTH {
+        for y in 0..HEIGHT {
+            if x == 0 || y == 0 || x == WIDTH - 1 || y == HEIGHT - 1 {
+                collision_map[x][y] = 2;
+            }
+        }
+    }
+
+    (agents, collision_map)
 }
 
 /// r x r filter cernel
