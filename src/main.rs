@@ -2,12 +2,15 @@ use fast_poisson::Poisson2D;
 use image::{open, GenericImage, GenericImageView, ImageBuffer};
 use minifb::{Key, KeyRepeat, ScaleMode, Window, WindowOptions};
 use rand::Rng;
+use std::{path::Path, thread, time};
 
 const WIDTH: usize = 1024;
 const HEIGHT: usize = 1024;
 
 fn main() {
     let mut rng = rand::thread_rng();
+
+    let mut current_frame: u32 = 0;
 
     let mut buffer = vec![0u32; WIDTH * HEIGHT];
 
@@ -57,6 +60,9 @@ fn main() {
             );
 
             if n_x > 0. && n_y > 0. && (n_x as usize) < WIDTH && (n_y as usize) < HEIGHT {
+                // if collision_map[n_x as usize][n_y as usize] == 2 {
+                //     agent.deposition_size = 0.;
+                // } else
                 if collision_map[n_x as usize][n_y as usize] == 0 {
                     // doesn't work correctly -> random agent movements
                     collision_map[n_x as usize][n_y as usize] = 1;
@@ -122,9 +128,9 @@ fn main() {
         // env to buffer
         for (index, value) in env.iter().enumerate() {
             buffer[index] = rgb_to_color(
-                (value * 255.) as u32,
-                (0. * 255.) as u32,
-                (0. * 255.) as u32,
+                (value * 255.) as u8,
+                (value * 255.) as u8,
+                (value * 255.) as u8,
             );
         }
 
@@ -146,6 +152,20 @@ fn main() {
 
         // update window
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
+        // slow image export down if sth happens
+        // thread::sleep(time::Duration::from_millis(100));
+        // let mut luminance_buffer: Vec<u8> = Vec::new();
+        // for value in env.iter() {
+        //     luminance_buffer.push((value * 255.) as u8);
+        // }
+        // image::save_buffer(
+        //     &Path::new(&format!("image-{}.jpg", current_frame)),
+        //     luminance_buffer.as_slice(),
+        //     WIDTH as u32,
+        //     HEIGHT as u32,
+        //     image::ColorType::L8,
+        // );
+        // current_frame += 1;
     }
 }
 
@@ -184,14 +204,14 @@ fn setup_agents() -> (Vec<Agent>, Vec<Vec<u8>>) {
         .into_luma8()
         .enumerate_pixels()
     {
-        if *pixel.0.get(0).unwrap() != 0 && x % 10 == 0 && y % 10 == 0 {
+        if *pixel.0.get(0).unwrap() != 0 && x % 5 == 0 && y % 5 == 0 {
             agents.push(Agent {
                 x: x as f32,
                 y: y as f32,
                 rotation: (rng.gen_range(0..360) as f32).to_radians(),
                 sensor_angle: (rng.gen_range(20..45) as f32).to_radians(),
                 rotation_angle: (rng.gen_range(20..45) as f32).to_radians(),
-                sensor_offset_distance: 19., // 9
+                sensor_offset_distance: 20., // 9
                 sensor_width: 1.,
                 step_size: 1.5,      // 1
                 deposition_size: 1., // 5
@@ -202,9 +222,21 @@ fn setup_agents() -> (Vec<Agent>, Vec<Vec<u8>>) {
         }
     }
 
+    // init rect collisions
     for x in 0..WIDTH {
         for y in 0..HEIGHT {
             if x == 0 || y == 0 || x == WIDTH - 1 || y == HEIGHT - 1 {
+                collision_map[x][y] = 2;
+            }
+        }
+    }
+
+    // init petri collisions
+    let center = WIDTH / 2;
+    let radius = 400 * 400;
+    for x in 0..WIDTH {
+        for y in 0..HEIGHT {
+            if (center - x).pow(2) + (center - y).pow(2) >= radius {
                 collision_map[x][y] = 2;
             }
         }
@@ -254,8 +286,8 @@ fn color_to_rgb(color: u32) -> (u32, u32, u32) {
     (color >> 16 & 0xff, color >> 8 & 0xff, color & 0xff)
 }
 
-fn rgb_to_color(r: u32, g: u32, b: u32) -> u32 {
-    r << 16 | g << 8 | b
+fn rgb_to_color(r: u8, g: u8, b: u8) -> u32 {
+    (r as u32) << 16 | (g as u32) << 8 | b as u32
 }
 
 struct Agent {
