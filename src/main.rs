@@ -4,6 +4,9 @@ use minifb::{Key, KeyRepeat, ScaleMode, Window, WindowOptions};
 use rand::Rng;
 use std::{path::Path, thread, time};
 
+use svg::node::element::path::Data;
+use svg::Document;
+
 const WIDTH: usize = 1024;
 const HEIGHT: usize = 1024;
 
@@ -76,6 +79,9 @@ fn main() {
                     agent.rotation = (rng.gen_range(0..360) as f32).to_radians();
                 }
             }
+
+            // add to svg path
+            agent.pos_to_svg();
         }
 
         // agent sensory stage
@@ -152,6 +158,7 @@ fn main() {
 
         // update window
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
+
         // slow image export down if sth happens
         // thread::sleep(time::Duration::from_millis(100));
         // let mut luminance_buffer: Vec<u8> = Vec::new();
@@ -166,6 +173,8 @@ fn main() {
         //     image::ColorType::L8,
         // );
         // current_frame += 1;
+
+        if window.is_key_pressed(Key::S, KeyRepeat::No) {}
     }
 }
 
@@ -217,6 +226,7 @@ fn setup_agents() -> (Vec<Agent>, Vec<Vec<u8>>) {
                 deposition_size: 1., // 5
                 random_dir_change_prob: 0.,
                 sensitivity_thresh: 0.,
+                path_data: Data::new().move_to((x as f32, y as f32)),
             });
             collision_map[x as usize][y as usize] = 1;
         }
@@ -302,4 +312,11 @@ struct Agent {
     deposition_size: f32,
     random_dir_change_prob: f32,
     sensitivity_thresh: f32,
+    path_data: svg::node::element::path::Data,
+}
+
+impl Agent {
+    fn pos_to_svg(self) {
+        self.path_data.line_to((self.x, self.y));
+    }
 }
