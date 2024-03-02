@@ -185,7 +185,6 @@ fn setup_agents() -> (Vec<Agent>, Vec<Vec<u8>>) {
         .enumerate_pixels()
     {
         if *pixel.0.get(0).unwrap() != 0 && x % 10 == 0 && y % 10 == 0 {
-            println!("{:?}", *pixel.0.get(0).unwrap());
             agents.push(Agent {
                 x: x as f32,
                 y: y as f32,
